@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Колесо Димки</title>
+<style>
+:root{
+  --bg:#fafafa; --fg:#18181b; --muted:#71717a; --line:#e4e4e7; --card:#ffffff;
+  --c1:#e4e4e7; --c2:#d4d4d8; --c3:#fde68a; --c4:#bfdbfe; --c5:#fecaca; --c6:#bbf7d0;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#111113; --fg:#f4f4f5; --muted:#a1a1aa; --line:#2a2a2e; --card:#18181b;
+  }
+}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{
+  margin:0; background:var(--bg); color:var(--fg);
+  font-family:Inter,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  min-height:100vh; display:flex; justify-content:center;
+}
+main{width:100%; max-width:520px; padding:32px 20px 48px; display:flex; flex-direction:column; align-items:center; gap:24px}
+h1{font-size:20px; font-weight:600; margin:0; letter-spacing:-.01em}
+.wheel-wrap{position:relative; width:min(86vw,380px); aspect-ratio:1}
+.pointer{
+  position:absolute; top:-6px; left:50%; transform:translateX(-50%); z-index:2;
+  width:0; height:0; border-left:11px solid transparent; border-right:11px solid transparent;
+  border-top:20px solid var(--fg);
+}
+canvas{width:100%; height:100%; display:block}
+#wheel{transition:transform 4.5s cubic-bezier(.12,.6,.1,1)}
+.hub{
+  position:absolute; inset:0; margin:auto; width:84px; height:84px; border-radius:50%;
+  background:var(--fg); border:4px solid var(--bg); color:var(--bg);
+  box-shadow:0 0 0 2px var(--fg);
+  padding:0; display:flex; align-items:center; justify-content:center;
+  font-family:inherit; font-size:15px; font-weight:800; letter-spacing:.02em; line-height:1;
+  cursor:pointer; transition:transform .15s ease;
+}
+.hub:not(:disabled):active{transform:scale(.94)}
+.hub:disabled{cursor:default; opacity:.6}
+.result{min-height:32px; font-size:22px; font-weight:600; text-align:center; letter-spacing:-.01em}
+.result.muted{color:var(--muted); font-weight:400; font-size:15px}
+.panel{width:100%; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; display:flex; flex-direction:column; gap:12px}
+.add{display:flex; gap:8px}
+input{
+  flex:1; min-width:0; font:inherit; font-size:16px; color:var(--fg); background:transparent;
+  border:1px solid var(--line); border-radius:8px; padding:10px 12px;
+}
+input:focus,button:focus-visible{outline:2px solid var(--fg); outline-offset:1px}
+.btn{font:inherit; font-size:15px; border:1px solid var(--fg); background:var(--fg); color:var(--bg); border-radius:8px; padding:10px 14px; cursor:pointer}
+ul{list-style:none; margin:0; padding:0; display:flex; flex-direction:column}
+li{display:flex; align-items:center; gap:10px; padding:9px 0; border-top:1px solid var(--line); font-size:15px}
+li:first-child{border-top:0}
+.dot{width:10px; height:10px; border-radius:50%; flex:none}
+.name{flex:1; overflow-wrap:anywhere}
+.x{background:none; border:0; color:var(--muted); font-size:18px; cursor:pointer; padding:2px 8px; line-height:1}
+.x:hover{color:var(--fg)}
+.opts{display:flex; justify-content:space-between; align-items:center; font-size:14px; color:var(--muted)}
+.opts label{display:flex; gap:8px; align-items:center; cursor:pointer}
+.link{background:none; border:0; color:var(--muted); font:inherit; font-size:14px; cursor:pointer; text-decoration:underline; padding:0}
+@media (prefers-reduced-motion:reduce){#wheel{transition-duration:.01s}}
+</style>
+</head>
+<body>
+<main>
+  <h1>Колесо Димки</h1>
+
+  <div class="wheel-wrap">
+    <div class="pointer"></div>
+    <canvas id="wheel" width="760" height="760"></canvas>
+    <button class="hub" id="spin" aria-label="Крутить">Крутить</button>
+  </div>
+
+  <div class="result muted" id="result">Нажми на центр колеса</div>
+
+  <section class="panel">
+    <div class="add">
+      <input id="newItem" type="text" placeholder="Новый вариант" maxlength="40" autocomplete="off">
+      <button class="btn" id="addBtn">Добавить</button>
+    </div>
+    <ul id="list"></ul>
+    <div class="opts">
+      <label><input type="checkbox" id="removeWinner" style="flex:none"> Убирать победителя</label>
+      <button class="link" id="reset">Сбросить</button>
+    </div>
+  </section>
+</main>
+
+<script>
+const COLORS = ['#e4e4e7','#fde68a','#bfdbfe','#fecaca','#bbf7d0','#ddd6fe'];
+const DEFAULTS = ['Пицца','Суши','Бургер','Паста','Салат','Шаурма'];
+let items = DEFAULTS.slice();
+let rotation = 0;
+let spinning = false;
+
+const canvas = document.getElementById('wheel');
+const ctx = canvas.getContext('2d');
+const listEl = document.getElementById('list');
+const resultEl = document.getElementById('result');
+const spinBtn = document.getElementById('spin');
+const input = document.getElementById('newItem');
+
+function isDark(){
+  return matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+function draw(){
+  const W = canvas.width, R = W/2 - 4, n = items.length;
+  ctx.clearRect(0,0,W,W);
+  const fg = isDark() ? '#f4f4f5' : '#18181b';
+  if(n === 0){
+    ctx.beginPath(); ctx.arc(W/2,W/2,R,0,Math.PI*2);
+    ctx.strokeStyle = fg; ctx.lineWidth = 2; ctx.stroke();
+    return;
+  }
+  const a = Math.PI*2/n;
+  for(let i=0;i<n;i++){
+    const start = -Math.PI/2 + i*a, end = start + a;
+    ctx.beginPath(); ctx.moveTo(W/2,W/2); ctx.arc(W/2,W/2,R,start,end); ctx.closePath();
+    ctx.fillStyle = isDark() ? shade(COLORS[i%COLORS.length]) : COLORS[i%COLORS.length];
+    ctx.fill();
+    ctx.strokeStyle = isDark() ? '#111113' : '#fafafa'; ctx.lineWidth = 3; ctx.stroke();
+
+    ctx.save();
+    ctx.translate(W/2,W/2);
+    ctx.rotate(start + a/2);
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = isDark() ? '#f4f4f5' : '#18181b';
+    let size = n > 12 ? 22 : 30;
+    ctx.font = `500 ${size}px Inter,-apple-system,"Segoe UI",sans-serif`;
+    let t = items[i];
+    while(ctx.measureText(t).width > R*0.68 && t.length > 3) t = t.slice(0,-2);
+    if(t !== items[i]) t += '…';
+    ctx.fillText(t, R-24, 0);
+    ctx.restore();
+  }
+  ctx.beginPath(); ctx.arc(W/2,W/2,R,0,Math.PI*2);
+  ctx.strokeStyle = fg; ctx.lineWidth = 3; ctx.stroke();
+}
+
+function shade(hex){
+  const n = parseInt(hex.slice(1),16);
+  const r=(n>>16)&255, g=(n>>8)&255, b=n&255;
+  return `rgb(${Math.round(r*.45)},${Math.round(g*.45)},${Math.round(b*.45)})`;
+}
+
+function renderList(){
+  listEl.innerHTML = '';
+  items.forEach((t,i)=>{
+    const li = document.createElement('li');
+    const dot = document.createElement('span'); dot.className='dot';
+    dot.style.background = COLORS[i%COLORS.length];
+    dot.style.border = '1px solid rgba(128,128,128,.4)';
+    const name = document.createElement('span'); name.className='name'; name.textContent = t;
+    const x = document.createElement('button'); x.className='x'; x.textContent='×';
+    x.setAttribute('aria-label','Удалить '+t);
+    x.onclick = ()=>{ if(spinning) return; items.splice(i,1); update(); };
+    li.append(dot,name,x);
+    listEl.append(li);
+  });
+  spinBtn.disabled = spinning || items.length < 2;
+}
+
+function update(){
+  draw(); renderList();
+  if(items.length < 2){ setResult(items.length ? 'Добавь ещё вариант' : 'Добавь варианты', true); }
+}
+
+function setResult(text, muted){
+  resultEl.textContent = text;
+  resultEl.classList.toggle('muted', !!muted);
+}
+
+function spin(){
+  if(spinning || items.length < 2) return;
+  spinning = true; spinBtn.disabled = true;
+  setResult('…', true);
+  const n = items.length, a = 360/n;
+  const winner = Math.floor(Math.random()*n);
+  // центр сегмента winner должен оказаться под указателем (сверху)
+  const jitter = (Math.random()-.5) * a * .7;
+  const target = 360 - (winner*a + a/2) + jitter;
+  const current = ((rotation % 360) + 360) % 360;
+  let delta = target - current;
+  if(delta < 0) delta += 360;
+  rotation += 360*6 + delta;
+  canvas.style.transform = `rotate(${rotation}deg)`;
+
+  const done = ()=>{
+    canvas.removeEventListener('transitionend', done);
+    spinning = false;
+    setResult(items[winner], false);
+    if(document.getElementById('removeWinner').checked){
+      setTimeout(()=>{ items.splice(winner,1); rotation = 0;
+        canvas.style.transition='none'; canvas.style.transform='rotate(0deg)';
+        void canvas.offsetWidth; canvas.style.transition='';
+        update(); }, 900);
+    } else { renderList(); }
+  };
+  canvas.addEventListener('transitionend', done);
+}
+
+function add(){
+  const v = input.value.trim();
+  if(!v || spinning) return;
+  items.push(v); input.value=''; update(); input.focus();
+}
+
+spinBtn.onclick = spin;
+document.getElementById('addBtn').onclick = add;
+input.addEventListener('keydown', e=>{ if(e.key==='Enter') add(); });
+document.getElementById('reset').onclick = ()=>{
+  if(spinning) return;
+  items = DEFAULTS.slice(); rotation = 0;
+  canvas.style.transition='none'; canvas.style.transform='rotate(0deg)';
+  void canvas.offsetWidth; canvas.style.transition='';
+  setResult('Нажми на центр колеса', true); update();
+};
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw);
+
+update();
+</script>
+</body>
+</html>
